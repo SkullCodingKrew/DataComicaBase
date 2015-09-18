@@ -5,7 +5,7 @@
 ##############################################
 ### Python Default modules ###################
 from sys import argv
-
+import os
 ## Beatiful soup import
 from bs4 import BeautifulSoup
 
@@ -14,6 +14,9 @@ import urllib2
 
 ### Regular expressions
 import re
+
+### SQL ORM
+from sqlobject import *
 
 ### ComicBook classes ########################
 from ComicBook import ComicBook
@@ -50,6 +53,7 @@ def get_comic_title (text_string):
         volume => Volume of the comic book title
         order  => Number in reading order (optional)
     """
+      
     match = title_re.match(text_string)
 
     if (match):
@@ -76,10 +80,29 @@ main_comic_table = main_table.tr.td.table
 ## Get Title and order number
 comic_title_tags = main_table.select("h1")
 title,number,volume,order = get_comic_title(comic_title_tags[0].get_text())
+number = int(number)
+volume = int(volume)
+order  = int(order)
+
+## Get StoryName needs a better navigation 
+story_name_tags = main_comic_table.select('div')
+
+story_name = story_name_tags[0].get_text().replace('"','')
+
+## Create connection
+db_filename = os.path.abspath('comicdatabase.sqlite')
+if os.path.exists(db_filename):
+    os.unlink(db_filename)
+connection_string = 'sqlite:' + db_filename
+connection = connectionForURI(connection_string)
+sqlhub.processConnection = connection
+
+## Create Comic Book table if not present
+ComicBook.createTable(ifNotExists=True)
 
 ## Create Comic Book object
 ## TODO: Implement directly as a tuple
-myComic = ComicBook(title,number,volume,order)
+myComic = ComicBook(comicTitle=title,issue=number,volume=volume,orderNumber=order,storyName=story_name)
 
 ## Get all issues details
 issue_details = main_comic_table.select('.issue_detail_section')
