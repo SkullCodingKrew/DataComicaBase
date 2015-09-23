@@ -77,6 +77,7 @@ class ComicBook(SQLObject):
     comicTitle    = StringCol()
     volume        = IntCol()
     issue         = IntCol()
+    part          = StringCol(default=None)
     
     ## Story Related
     storyName     = StringCol()
