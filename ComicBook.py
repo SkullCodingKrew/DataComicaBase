@@ -293,7 +293,7 @@ class ComicBook(SQLObject):
 class ComicAuthors(SQLObject):
     """ Comic Author relationship class, to be explained ;) """
     class sqlmeta:
-         table = "comic_authors"
+        table = "comic_authors"
     
     ## Correlation table rows
     comic  = ForeignKey('ComicBook', notNull=True, cascade=True)
@@ -305,7 +305,7 @@ class ComicAuthors(SQLObject):
 class ComicCharacters(SQLObject):
     """ Comic Author relationship class, to be explained ;) """
     class sqlmeta:
-         table = "comic_characters"
+        table = "comic_characters"
     
     ## Correlation table rows
     comic     = ForeignKey('ComicBook', notNull=True, cascade=True)
@@ -318,12 +318,21 @@ class ComicCharacters(SQLObject):
 class ComicChargroups(SQLObject):
     """ Comic Groups relationship class, to be explained ;) """
     class sqlmeta:
-         table = "comic_chargroups"
+        table = "comic_chargroups"
     
     ## Correlation table rows
     comic     = ForeignKey('ComicBook', notNull=True, cascade=True)
     group     = ForeignKey('CharGroup', notNull=True, cascade=True)
     comment   = StringCol(default=None)
     unique    = index.DatabaseIndex(comic, group, unique=True)
-    
 
+### CMRO ############################################    
+class CMRO(SQLObject):
+    """ This class links the comic with the CMRO DB properties """
+    class sqlmeta:
+        table = "cmro_info"   
+    ###
+    #id = ForeignKey('ComicBook',notNull=True, cascade=True)
+    cmroId     = IntCol()
+    nextCmroId = IntCol(default=None)
+    prevCmroId = IntCol(default=None)

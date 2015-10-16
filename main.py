@@ -4,15 +4,15 @@
 ### Import definitions                    ####
 ##############################################
 ### Python Default modules ###################
-from sys import argv
+from sys import argv,exit
 import os
 from datetime import datetime
 
 ## Beatiful soup import
 from bs4 import BeautifulSoup,SoupStrainer
 
-## For opening urls
-import urllib2
+## For opening urls (better than urllib2)
+from urlgrabber import urlread
 
 ### Regular expressions
 import re
@@ -95,7 +95,13 @@ def get_comic_title (main_table_item):
     else:
         print "No h1 found on following table html %s" % (main_table_item)
         return None
-        
+
+def comic2string (comic_kwargs):
+    """ Take comic kwargs and convert it to a nice string for reporting """
+    string_out = comic_kwargs['comicTitle'] + " " + str(comic_kwargs['issue'])
+    string_out += "#"+comic_kwargs['part']+" (v"+ str(comic_kwargs['volume']) + ")"
+    return string_out
+
 def get_comic_story (story_table_item):
     """ Get story description from main table """
     
@@ -111,7 +117,7 @@ def get_comic_story (story_table_item):
             
     ## If found add history
     if (story_name_tags):
-        comic_kwargs['storyName'] = story_name_tags.get_text().replace('"','')
+        comic_kwargs['storyName'] = story_name_tags.get_text().replace('"','').strip()
         
     return comic_kwargs
 
@@ -153,7 +159,7 @@ def get_comic_synopsys (story_table_item):
             
     ## If found add history
     if (synopsys_tags):
-        comic_kwargs['storySynopsys'] = synopsys_tags.get_text()
+        comic_kwargs['storySynopsys'] = synopsys_tags.get_text().strip()
                    
     return comic_kwargs
 
@@ -224,50 +230,158 @@ def get_characters_groups (char_table_item):
     
     return char_group_kwargs
 
-        
+def get_next_issue_id (table_item):
+    """ Get the id for the next comic in full order """
+    
+    ## Default variables
+    links_div = None
+    issues_dict = {}
+    
+    
+    ## Try finding the divs with the links on the piece of HTML
+    try:
+        order_tr = table_item.td.table.tr
+        links_div = order_tr.find_all('div')           
+    except Exception as e:
+        print e
+        print "Error : False order section selected \n %s" %(table_item)
+        return
+    
+    ## First Key for previous issues
+    key = "previous"
+    issues_dict[key] = []
+    if (links_div):
+        ## Iterate through the divs
+        for link_item in (links_div):
+            ## Get the anchor HTML with the link to the issue
+            anchors = link_item.find_all("a")
+            ## If not an anchor we are in actual issue, change key to next issues
+            if (not anchors):
+                key = "next"
+                issues_dict[key] = []
+            ## Else search for the id in the href and append it to the corresponding list
+            else:
+                id_match = re.search("detail\.php\?idvalue\=(\d*)",anchors[0]['href'])
+                issues_dict[key].append(id_match.group(1))
+            
+            
+    return issues_dict
+
+def connect_database(db_filename=":memory:"):
+    """ Connect to database and create tables if needed """
+    ## Connect SQL Lite
+    connection_string = 'sqlite:' + db_filename
+    connection = connectionForURI(connection_string)
+    sqlhub.processConnection = connection
+
+    ## Create Comic Book table if not present
+    ## ifNotExist was not working properly
+    if (not ComicBook.tableExists()):
+        ComicBook.createTable()
+    ## Create Author table if not present
+    if (not Author.tableExists()):
+        Author.createTable()
+    if (not ComicAuthors.tableExists()):
+        ComicAuthors.createTable()
+    if (not Character.tableExists()):    
+        Character.createTable()
+    if (not ComicCharacters.tableExists()):
+        ComicCharacters.createTable()
+    if (not CharGroup.tableExists()):
+        CharGroup.createTable()
+    if (not ComicChargroups.tableExists()):
+        ComicChargroups.createTable()
+    if (not CMRO.tableExists()):
+        CMRO.createTable()
+
+def search_for_last():
+    """ Try to get the last comic processed to resume the downloading """
+    
+    ## As we process the comics by reading order search for the max order number
+    lastComic_ordernum = ComicBook.select().max(ComicBook.q.orderNumber)
+    lastComic_search = ComicBook.selectBy(orderNumber=lastComic_ordernum)
+    myLastComic = lastComic_search.getOne(default=None)
+    
+    ## Deafult values
+    next_id = 1
+    prev_id = 0
+
+    ## If last comic found get the CMRO
+    if (myLastComic):
+        myLastCMRO_search = CMRO.selectBy(id=myLastComic.id)
+        myLastCMRO = myLastCMRO_search.getOne(default=None)
+        if (myLastCMRO):
+            next_id = myLastCMRO.nextCmroId
+            prev_id = myLastCMRO.prevCmroId
+    
+    return (next_id,prev_id)
+    
 ##############################################
 ### Main                                  ####
 ##############################################
 ## Create connection to database
 db_filename = os.path.abspath('comicdatabase.sqlite')
+#os.unlink(db_filename)
+    
+## Check if exist and get the max value
 if os.path.exists(db_filename):
-    os.unlink(db_filename)
+    connect_database(db_filename)
+    #os.unlink(db_filename)
+    (next_id,prev_id) = search_for_last()
+else:
+    ## Begin with issue id 1
+    connect_database(db_filename)
+    next_id = 1
+    prev_id = 0
+    
 
-## Connect SQL Lite
-connection_string = 'sqlite:' + db_filename
-connection = connectionForURI(connection_string)
-sqlhub.processConnection = connection
+## This is for comparisson
+last_issue_ids = {}
 
-## Create Comic Book table if not present
-ComicBook.createTable(ifNotExists=True)
-Author.createTable(ifNotExists=True)
-ComicAuthors.createTable(ifNotExists=True)
-Character.createTable(ifNotExists=True)
-ComicCharacters.createTable(ifNotExists=True)
-CharGroup.createTable(ifNotExists=True)
-ComicChargroups.createTable(ifNotExists=True)
-
+## Loop while ids available
+while (next_id):
 ## Process each file
-for file_path in (argv[1:]):
-    if os.path.isfile(file_path):
+#for file_path in (argv[1:]):
+#    if os.path.isfile(file_path):
         
         ## Open file and process it with beatiful Soup
         ############################################################################
-        fh = open(file_path,'r')
-        print "Processing : %s" % (file_path)
+#        comic_html = open(file_path,'r')
+#        print "Processing : %s" % (file_path)
         
+        comic_url = "http://cmro.travis-starnes.com/detail.php?idvalue=%s" % (next_id)
+        print "Proccessing : %s" % (comic_url)
+        
+        try:
+            comic_html = urlread(comic_url)
+            #time.sleep(2)
+        except Exception as e:
+            print "Error : Fetching from %s did not worked out due to: "
+            print e
+            
         ## Use a parser to get rid of everything but the tables we want
         only_tables = SoupStrainer('table')
-        soup = BeautifulSoup(fh,'lxml', parse_only=only_tables)
+        soup = BeautifulSoup(comic_html,'lxml', parse_only=only_tables)
         
         ## Main table containing issue and ratings
         try:
-            main_comic_table = soup.contents[2].tr.td.table 
-        except:
+            main_table = None
+            for content in (soup.children):
+                ## Search for the one containing the title detail
+                if (not content.string and content.find_all("a",href=re.compile("title_detail.php"))):
+                    main_table = content
+                    break
+            if (main_table):
+                main_comic_tables = main_table.find_all("table",bgcolor="#D8D8D8")
+            if (not main_comic_tables or len(main_comic_tables)>1):
+                raise Exception("Main comic table not found on HTML")
+        except Exception as e:
             print "Error : No well formed CMRO html"
-            exit
+            print e
+            exit()
         
-        main_comic_items = main_comic_table.find_all("tr",recursive=False)
+        ### Get all items from main comic table for next process
+        main_comic_items = main_comic_tables[0].find_all("tr",recursive=False)
         
         ## Check if essential issue is there (used for recalculate tr index)
         ############################################################################
@@ -280,15 +394,17 @@ for file_path in (argv[1:]):
         comic_kwargs = get_comic_title(main_comic_items[2+idx_inc])
         
         if (not comic_kwargs) :
-            print "Error : No comic found for %s" % (file_path)
+            print "Error : No comic found for id: %s" % (next_id)
             next
-        
+        else:
+            print "Processing comic %s" % (comic2string(comic_kwargs))
+            
         ## Add the Story (4 tr on main table)
         ############################################################################
         add_kwargs = get_comic_story(main_comic_items[3+idx_inc])
         
         if (not add_kwargs):
-            print "Error : No story found for %s" % (file_path)
+            print "Error : No story found for: %s" % (comic2string(comic_kwargs))
         else:    
             comic_kwargs.update(add_kwargs)
         
@@ -326,7 +442,7 @@ for file_path in (argv[1:]):
         add_kwargs = get_comic_synopsys(main_comic_items[13+idx_inc])
 
         if (not add_kwargs):
-            print "Error : No story found for %s" % (file_path)
+            print "Error : No story found for: %s" % (comic2string(comic_kwargs))
         else:
             comic_kwargs.update(add_kwargs)
 
@@ -351,6 +467,39 @@ for file_path in (argv[1:]):
         ############################################################################
         if ("groups" in char_grp_dict):
             myComic.add_groups(char_grp_dict["groups"])
+            
+        ## Find next comic to parse in the normal order, create CMRO entry
+        ############################################################################
+        cmro_kwargs = {}
+        ## Try to find order and get indexes
+        issues_id = None
+        if ("ORDER" in main_comic_items[8+idx_inc].get_text()):
+            issues_id = get_next_issue_id(main_comic_items[9+idx_inc])
+        
+        ## Create the arguments for myCMRO
+        cmro_kwargs['id'] = myComic.id
+        cmro_kwargs['cmroId'] = next_id
+            
+        ## Check if found and get previous and next id        
+        if (issues_id):
+            
+            ## Check if there is a next_id and get the first item
+            if (issues_id['next'] and len(issues_id['next'])>0):
+                cmro_kwargs['nextCmroId'] = int(issues_id['next'][0])
+            
+            ## Check if there is a previous id and get the last item
+            if (issues_id['previous'] and len(issues_id['previous'])>0):
+                cmro_kwargs['prevCmroId'] = int(issues_id['previous'][-1])
 
+        else:
+            print "No next comic found on list for : %s" % (comic2string(comic_kwargs))    
+        
+        ## Create the CMRO item
+        myCMRO = CMRO(**cmro_kwargs)
+        
+        ## Set next id
+        if (myCMRO.nextCmroId):
+            next_id = myCMRO.nextCmroId
+        
 ## THE END of main
-print "Finished parsing the html files"
+print "Finished parsing CMRO"
